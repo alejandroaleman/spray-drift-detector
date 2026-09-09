@@ -9,8 +9,8 @@
 A remote sensing analytics pipeline utilizing **Copernicus Sentinel-2 Surface Reflectance** and **Google Earth Engine (GEE)** to conduct ex-post audits on agricultural spraying operations (chemical fallow, herbicides, desiccants, fungicides).
 
 Designed to identify and diagnose both:
-- **Exoderiva (Off-Target Drift):** Chemical escape impacting neighboring crops, tree lines, or natural reserves outside the field perimeter.
-- **Endoderiva & Application Uniformity:** Untreated strips, nozzle clogging, or phytotoxicity within the target plot.
+- **Exo-drift (Off-Target Drift):** Chemical escape impacting neighboring crops, tree lines, or natural reserves outside the field perimeter.
+- **Endo-drift & Application Uniformity:** Untreated strips, nozzle clogging, or phytotoxicity within the target plot.
 
 ---
 
@@ -31,7 +31,7 @@ Timeline:
 ### 2. Multi-temporal Cloud/Shadow Masking via SCL
 To prevent false-positive drops in vegetation indices caused by cloud shadows or thin cirrus, the engine filters scenes using the **Scene Classification Layer (SCL)** from Sentinel-2 L2A (`COPERNICUS/S2_SR_HARMONIZED`), discarding cloud shadows, cirrus, and high/medium cloud probabilities. Composites are then aggregated using the **temporal median**, ensuring robust cloud-free mosaics.
 
-### 3. Extended Exoderiva Buffer
+### 3. Extended Exo-drift Buffer
 Rather than clipping strictly to the field boundary, the raster is exported with a surrounding outward buffer (default: **120 meters**). When visualized in QGIS, any chemical drift following the prevailing wind direction is immediately detectable beyond the boundary fence.
 
 $$\Delta\text{NDVI} = \text{NDVI}_{\text{post}} - \text{NDVI}_{\text{pre}}$$

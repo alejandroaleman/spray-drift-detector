@@ -2,21 +2,25 @@
 spray-drift-detector: Core Analytics Module
 Author: Alejandro Alemán Virasoro
 Description: Post-application quality assessment, uniformity audit,
-             and drift detection (exoderiva / endoderiva) using Sentinel-2 and GEE.
+             and drift detection (exo-drift / endo-drift) using Sentinel-2 and GEE.
 """
 
 import os
-import json
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, Tuple
+from typing import Any
+
 import ee
 
 
-def initialize_earth_engine(project_id: str = "eefcainterpolation") -> None:
+def initialize_earth_engine(project_id: str | None = None) -> None:
     """Initialize Google Earth Engine session."""
+    target_project = project_id or os.getenv("EE_PROJECT_ID")
     try:
-        ee.Initialize(project=project_id)
-    except Exception:
+        if target_project:
+            ee.Initialize(project=target_project)
+        else:
+            ee.Initialize()
+    except Exception:  # noqa: BLE001
         ee.Initialize()
 
 
@@ -85,7 +89,7 @@ def build_spray_audit_raster(
     lag_days: int = 10,
     post_window_days: int = 15,
     buffer_meters: float = 120.0
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Builds the pre-spray, post-spray, and Delta-NDVI rasters considering product mode of action lag.
     
@@ -95,12 +99,12 @@ def build_spray_audit_raster(
         pre_window_days: Days before application to build pre-spray baseline (default: 15).
         lag_days: Days required for herbicide/chemical mode of action to take full effect (default: 10).
         post_window_days: Length of post-application observation window after lag (default: 15).
-        buffer_meters: Outward buffer around field boundary to detect exoderiva (spray drift) (default: 120m).
+        buffer_meters: Outward buffer around field boundary to detect exo-drift (spray drift) (default: 120m).
     
     Timeline:
         [pre_start -------- pre_end (app_date)] === SPRAY === [lag_days] === [post_start -------- post_end]
     """
-    app_dt = datetime.strptime(application_date, "%Y-%m-%d")
+    app_dt = datetime.strptime(application_date, "%Y-%m-%d")  # noqa: DTZ007
     
     pre_end_dt = app_dt
     pre_start_dt = app_dt - timedelta(days=pre_window_days)

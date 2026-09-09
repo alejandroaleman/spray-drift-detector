@@ -2,20 +2,21 @@
 """
 CLI Runner for Spray Drift & Uniformity Audit
 Usage example:
-    python run_audit.py --aoi data/input/santa_ana_18.geojson --date 2024-12-05 --lag 12 --buffer 120
+    python run_audit.py --aoi data/input/santa_ana_21.geojson --date 2024-12-05 --lag 15 --buffer 120
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
+
 import ee
 
 from src.audit_engine import (
-    initialize_earth_engine,
     build_spray_audit_raster,
     download_audit_geotiff,
-    export_audit_to_drive
+    export_audit_to_drive,
+    initialize_earth_engine,
 )
 
 
@@ -26,17 +27,18 @@ def parse_args():
     parser.add_argument("--pre-days", type=int, default=15, help="Days before spray for pre-baseline (default: 15)")
     parser.add_argument("--lag", type=int, default=10, help="Mode of action latency days (default: 10)")
     parser.add_argument("--post-days", type=int, default=15, help="Observation window days after lag (default: 15)")
-    parser.add_argument("--buffer", type=float, default=120.0, help="Exoderiva outer buffer distance in meters (default: 120.0)")
+    parser.add_argument("--buffer", type=float, default=120.0, help="Exo-drift outer buffer distance in meters (default: 120.0)")
     parser.add_argument("--export-drive", action="store_true", help="Export to Google Drive instead of direct download")
     parser.add_argument("--drive-folder", default="GIS_Export", help="Google Drive folder for export")
-    parser.add_argument("--project", default="eefcainterpolation", help="Google Cloud project for Earth Engine")
+    parser.add_argument("--project", default=None, help="Google Cloud project for Earth Engine (optional, defaults to env EE_PROJECT_ID or active credentials)")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     
-    print(f"[*] Initializing Earth Engine (project: {args.project})...")
+    project_display = args.project or os.getenv("EE_PROJECT_ID") or "default"
+    print(f"[*] Initializing Earth Engine (project: {project_display})...")
     initialize_earth_engine(project_id=args.project)
     
     if not os.path.exists(args.aoi):
@@ -54,7 +56,7 @@ def main():
     print(f"    - Pre-spray window: {args.pre_days} days")
     print(f"    - Product lag period: {args.lag} days")
     print(f"    - Post-spray window: {args.post_days} days")
-    print(f"    - Exoderiva buffer: {args.buffer} meters")
+    print(f"    - Exo-drift buffer: {args.buffer} meters")
     
     audit_data = build_spray_audit_raster(
         aoi_geometry=aoi_geom,
@@ -94,7 +96,7 @@ def main():
             print("    -> Band 3: NDVI_post")
             print("    -> Bands 4-7: B4 (Red), B3 (Green), B2 (Blue), B8 (NIR)")
             print("    -> Ready to drag & drop into QGIS!")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"[!] Direct download failed ({e}), falling back to Google Drive export...")
             export_audit_to_drive(
                 image=audit_data["audit_raster"],
