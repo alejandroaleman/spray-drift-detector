@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Local credentials & secrets
+*credentials*
+*private_key*.json
+.env
+
+# Large raster/geospatial outputs (keep samples if needed, ignore large dumps)
+data/output/*
+!data/output/.gitkeep
+data/input/*
+!data/input/.gitkeep
+!data/input/sample_field.geojson
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
