@@ -1,4 +1,4 @@
-# 🛰️ spray-drift-detector: Post-Application Quality & Drift Audit Engine
+# spray-drift-detector: Post-Application Quality & Drift Audit Engine
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Google Earth Engine](https://img.shields.io/badge/Google%20Earth%20Engine-API-brightgreen?logo=google)](https://earthengine.google.com)
@@ -14,7 +14,7 @@ Designed to identify and diagnose both:
 
 ---
 
-## 🔬 Core Methodology & Agronomic Logic
+## Core Methodology & Agronomic Logic
 
 ### 1. Herbicide Mode of Action (MoA) Latency (`lag_days`)
 Herbicides do not cause immediate spectral changes:
@@ -36,9 +36,11 @@ Rather than clipping strictly to the field boundary, the raster is exported with
 
 $$\Delta\text{NDVI} = \text{NDVI}_{\text{post}} - \text{NDVI}_{\text{pre}}$$
 
+> **Deep Dive:** For a full breakdown of the software pipeline, Mermaid flowcharts, and function specifications, see [System Architecture & Data Flow](docs/architecture.md).
+
 ---
 
-## 📁 Multi-band GeoTIFF Output (QGIS Ready)
+## Multi-band GeoTIFF Output (QGIS Ready)
 
 The engine generates a 7-band GeoTIFF ready for GIS analysis:
 - **Band 1 (`Delta_NDVI`):** Post - Pre NDVI difference. Values $<-0.20$ indicate strong burndown / drift impact.
@@ -48,7 +50,7 @@ The engine generates a 7-band GeoTIFF ready for GIS analysis:
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ### 1. Requirements & Setup
 ```bash
@@ -81,7 +83,7 @@ python run_audit.py \
 
 ---
 
-## 👨‍💻 Author
+## Author
 **Alejandro Alemán Virasoro**  
 *Agricultural Engineer | Geospatial Data Scientist & Remote Sensing Specialist*  
 - LinkedIn: [ing-alejandro-aleman](https://www.linkedin.com/in/ing-alejandro-aleman/)  
