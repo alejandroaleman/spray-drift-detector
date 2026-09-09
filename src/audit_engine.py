@@ -2,12 +2,13 @@
 spray-drift-detector: Core Analytics Module
 Author: Alejandro Alemán Virasoro
 Description: Post-application quality assessment, uniformity audit,
-             and drift detection using Sentinel-2 and Google Earth Engine (GEE).
+             and drift detection (exoderiva / endoderiva) using Sentinel-2 and GEE.
 """
 
-import json
 import os
-from typing import Dict, Any, Tuple
+import json
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, Tuple
 import ee
 
 
@@ -16,26 +17,38 @@ def initialize_earth_engine(project_id: str = "eefcainterpolation") -> None:
     try:
         ee.Initialize(project=project_id)
     except Exception:
-        # Fallback to default init if already authenticated
         ee.Initialize()
 
 
-def mask_s2_clouds(image: ee.Image) -> ee.Image:
+def mask_s2_sr_scl(image: ee.Image) -> ee.Image:
     """
-    Mask clouds in Sentinel-2 Surface Reflectance imagery using the QA60 band.
+    Mask clouds, cirrus, and cloud shadows using the Scene Classification Layer (SCL)
+    from Sentinel-2 Level-2A (COPERNICUS/S2_SR_HARMONIZED).
     
-    Bits 10 and 11 represent clouds and cirrus, respectively.
+    SCL Classes to keep (clear land/vegetation):
+      4: Vegetation
+      5: Bare soil
+      6: Water
+      7: Unclassified (low confidence)
+    
+    Classes filtered out:
+      0: No data
+      1: Saturated or defective
+      2: Dark area pixels
+      3: Cloud shadows
+      8: Cloud medium probability
+      9: Cloud high probability
+      10: Thin cirrus
+      11: Snow / Ice
     """
-    qa = image.select('QA60')
-    cloud_bit_mask = 1 << 10
-    cirrus_bit_mask = 1 << 11
-    
-    # Both flags should be set to zero, indicating clear conditions.
-    mask = qa.bitwiseAnd(cloud_bit_mask).eq(0).And(
-        qa.bitwiseAnd(cirrus_bit_mask).eq(0)
+    scl = image.select('SCL')
+    valid_mask = (
+        scl.eq(4)
+        .Or(scl.eq(5))
+        .Or(scl.eq(6))
+        .Or(scl.eq(7))
     )
-    
-    return image.updateMask(mask).divide(10000)
+    return image.updateMask(valid_mask).divide(10000)
 
 
 def calculate_ndvi(image: ee.Image) -> ee.Image:
@@ -44,81 +57,146 @@ def calculate_ndvi(image: ee.Image) -> ee.Image:
 
 
 def get_temporal_composite(
-    aoi: ee.Geometry,
+    roi: ee.Geometry,
     start_date: str,
     end_date: str,
-    max_cloud_percentage: float = 25.0
+    max_cloud_percentage: float = 30.0
 ) -> ee.Image:
     """
-    Query and generate cloud-free median composite for a specified time window.
-    
-    Returns:
-        ee.Image with bands and calculated NDVI.
+    Generate cloud/shadow-free median composite for a specified temporal window.
+    Using median() minimizes residual cloud/shadow artifacts.
     """
     collection = (
         ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-        .filterBounds(aoi)
+        .filterBounds(roi)
         .filterDate(start_date, end_date)
         .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', max_cloud_percentage))
-        .map(mask_s2_clouds)
+        .map(mask_s2_sr_scl)
         .map(lambda img: img.addBands(calculate_ndvi(img)))
     )
     
-    composite = collection.median().clip(aoi)
-    return composite
+    return collection.median().clip(roi)
 
 
-def compute_spray_impact(
+def build_spray_audit_raster(
     aoi_geometry: ee.Geometry,
-    pre_dates: Tuple[str, str],
-    post_dates: Tuple[str, str],
-    buffer_distance_meters: float = 60.0
+    application_date: str,
+    pre_window_days: int = 15,
+    lag_days: int = 10,
+    post_window_days: int = 15,
+    buffer_meters: float = 120.0
 ) -> Dict[str, Any]:
     """
-    Computes pre vs post application metrics, NDVI differences,
-    and analyzes surrounding buffer zones for spray drift detection.
+    Builds the pre-spray, post-spray, and Delta-NDVI rasters considering product mode of action lag.
+    
+    Args:
+        aoi_geometry: Target field polygon (ee.Geometry).
+        application_date: Date of chemical spray (YYYY-MM-DD).
+        pre_window_days: Days before application to build pre-spray baseline (default: 15).
+        lag_days: Days required for herbicide/chemical mode of action to take full effect (default: 10).
+        post_window_days: Length of post-application observation window after lag (default: 15).
+        buffer_meters: Outward buffer around field boundary to detect exoderiva (spray drift) (default: 120m).
+    
+    Timeline:
+        [pre_start -------- pre_end (app_date)] === SPRAY === [lag_days] === [post_start -------- post_end]
     """
-    pre_composite = get_temporal_composite(aoi_geometry, pre_dates[0], pre_dates[1])
-    post_composite = get_temporal_composite(aoi_geometry, post_dates[0], post_dates[1])
+    app_dt = datetime.strptime(application_date, "%Y-%m-%d")
+    
+    pre_end_dt = app_dt
+    pre_start_dt = app_dt - timedelta(days=pre_window_days)
+    
+    post_start_dt = app_dt + timedelta(days=lag_days)
+    post_end_dt = post_start_dt + timedelta(days=post_window_days)
+    
+    pre_start = pre_start_dt.strftime("%Y-%m-%d")
+    pre_end = pre_end_dt.strftime("%Y-%m-%d")
+    post_start = post_start_dt.strftime("%Y-%m-%d")
+    post_end = post_end_dt.strftime("%Y-%m-%d")
+    
+    # Extended region of interest (Field + Drift Buffer)
+    roi_extended = aoi_geometry.buffer(buffer_meters)
+    
+    # Generate composites
+    pre_composite = get_temporal_composite(roi_extended, pre_start, pre_end)
+    post_composite = get_temporal_composite(roi_extended, post_start, post_end)
     
     pre_ndvi = pre_composite.select('NDVI').rename('NDVI_pre')
     post_ndvi = post_composite.select('NDVI').rename('NDVI_post')
     
     # Delta NDVI: Post - Pre
-    # For herbicide fallow: significant negative delta indicates successful burndown/kill
-    # For fungicide/fertilizer: positive or sustained delta indicates response
     delta_ndvi = post_ndvi.subtract(pre_ndvi).rename('Delta_NDVI')
     
-    # Buffer analysis for Drift detection (Off-target impact)
-    external_buffer = aoi_geometry.buffer(buffer_distance_meters).difference(aoi_geometry)
-    
-    # In-field statistics
-    infield_stats = delta_ndvi.reduceRegion(
-        reducer=ee.Reducer.mean().combine(
-            reducer2=ee.Reducer.stdDev(), sharedInputs=True
-        ).combine(
-            reducer2=ee.Reducer.minMax(), sharedInputs=True
-        ),
-        geometry=aoi_geometry,
-        scale=10,
-        maxPixels=1e8
-    )
-    
-    # Buffer (Drift zone) statistics
-    drift_zone_stats = delta_ndvi.reduceRegion(
-        reducer=ee.Reducer.mean().combine(
-            reducer2=ee.Reducer.stdDev(), sharedInputs=True
-        ),
-        geometry=external_buffer,
-        scale=10,
-        maxPixels=1e8
+    # Combine multi-band audit image for QGIS analysis
+    # Bands: [Delta_NDVI, NDVI_pre, NDVI_post, B4_post, B3_post, B2_post, B8_post]
+    audit_multiband = (
+        delta_ndvi
+        .addBands(pre_ndvi)
+        .addBands(post_ndvi)
+        .addBands(post_composite.select(['B4', 'B3', 'B2', 'B8']))
     )
     
     return {
-        "pre_image": pre_composite,
-        "post_image": post_composite,
+        "audit_raster": audit_multiband,
         "delta_ndvi": delta_ndvi,
-        "external_buffer_geometry": external_buffer,
-        "infield_stats": infield_stats,
-        "drift_zone_stats": drift_zone_stats,
+        "pre_ndvi": pre_ndvi,
+        "post_ndvi": post_ndvi,
+        "roi_extended": roi_extended,
+        "windows": {
+            "application_date": application_date,
+            "pre": (pre_start, pre_end),
+            "lag_days": lag_days,
+            "post": (post_start, post_end),
+            "buffer_meters": buffer_meters
+        }
     }
+
+
+def export_audit_to_drive(
+    image: ee.Image,
+    description: str,
+    folder: str,
+    file_name: str,
+    region: ee.Geometry,
+    scale: int = 10,
+    crs: str = 'EPSG:4326'
+) -> ee.batch.Task:
+    """
+    Submits a batch export task to Google Drive to download GeoTIFF.
+    """
+    task = ee.batch.Export.image.toDrive(
+        image=image,
+        description=description,
+        folder=folder,
+        fileNamePrefix=file_name,
+        region=region,
+        scale=scale,
+        crs=crs,
+        maxPixels=1e9
+    )
+    task.start()
+    return task
+
+
+def download_audit_geotiff(
+    image: ee.Image,
+    region: ee.Geometry,
+    output_filepath: str,
+    scale: int = 10,
+    crs: str = 'EPSG:4326'
+) -> str:
+    """
+    Directly downloads GeoTIFF using ee.data.getDownloadURL (ideal for field-scale rasters).
+    Bypasses Google Drive batch waiting time for interactive local workflows.
+    """
+    import urllib.request
+    
+    url = image.getDownloadURL({
+        'scale': scale,
+        'crs': crs,
+        'region': region,
+        'format': 'GEO_TIFF'
+    })
+    
+    os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+    urllib.request.urlretrieve(url, output_filepath)
+    return output_filepath
